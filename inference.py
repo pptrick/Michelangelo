@@ -91,7 +91,7 @@ def save_pcld(args, surface:torch.Tensor):
 
 def reconstruction(args, model, bounds=(-1.25, -1.25, -1.25, 1.25, 1.25, 1.25), octree_depth=7, num_chunks=10000):
 
-    if str(args.pointcloud_path).endswith(".npy"):
+    if str(args.pointcloud_path).endswith(".npz"):
         surface = load_surface(args.pointcloud_path)
     else:
         mesh_sampler = MeshSampler(args.pointcloud_path)

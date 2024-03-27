@@ -1,0 +1,1 @@
+python test.py --task reconstruction --pointcloud_path ./example_data/surface/surface.npz --output_dir ./output_test
