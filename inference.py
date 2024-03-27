@@ -20,6 +20,7 @@ from michelangelo.models.tsal.inference_utils import extract_geometry
 from michelangelo.utils.misc import get_config_from_file, instantiate_from_config
 from michelangelo.utils.visualizers.pythreejs_viewer import PyThreeJSViewer
 from michelangelo.utils.visualizers import html_util
+from michelangelo.utils.sampler import MeshSampler
 
 def load_model(args):
 
@@ -77,14 +78,29 @@ def save_output(args, mesh_outputs):
 
     return 0
 
+def save_pcld(args, surface:torch.Tensor):
+    os.makedirs(args.output_dir, exist_ok=True)
+    points = surface[..., 0:3].detach().cpu().numpy().reshape(-1, 3)
+    normals = surface[..., 3:6].detach().cpu().numpy().reshape(-1, 3)
+    normals = (normals + 1.0) / 2.0
+    with open(os.path.join(args.output_dir, "original_pcld.obj"), 'w') as f:
+        N = len(points)
+        for i in range(N):
+            # write vertex, with normal color
+            f.write(f"v {points[i][0]} {points[i][1]} {points[i][2]} {normals[i][0]} {normals[i][1]} {normals[i][2]} \n")
+
 def reconstruction(args, model, bounds=(-1.25, -1.25, -1.25, 1.25, 1.25, 1.25), octree_depth=7, num_chunks=10000):
 
-    surface = load_surface(args.pointcloud_path)
-    
+    if str(args.pointcloud_path).endswith(".npy"):
+        surface = load_surface(args.pointcloud_path)
+    else:
+        mesh_sampler = MeshSampler(args.pointcloud_path)
+        surface = mesh_sampler.sample(n_points=4096)
+        surface = torch.FloatTensor(surface).unsqueeze(0).cuda()
+        
     # encoding
     shape_embed, shape_latents = model.model.encode_shape_embed(surface, return_latents=True)    
     shape_zq, posterior = model.model.shape_model.encode_kl_embed(shape_latents)
-
     # decoding
     latents = model.model.shape_model.decode(shape_zq)
     geometric_func = partial(model.model.shape_model.query_geometry, latents=latents)
@@ -102,7 +118,9 @@ def reconstruction(args, model, bounds=(-1.25, -1.25, -1.25, 1.25, 1.25, 1.25), 
     
     # save
     os.makedirs(args.output_dir, exist_ok=True)
-    recon_mesh.export(os.path.join(args.output_dir, 'reconstruction.obj'))    
+    recon_mesh.export(os.path.join(args.output_dir, 'reconstruction.obj'))   
+    
+    save_pcld(args, surface) 
     
     print(f'-----------------------------------------------------------------------------')
     print(f'>>> Finished and mesh saved in {os.path.join(args.output_dir, "reconstruction.obj")}')
