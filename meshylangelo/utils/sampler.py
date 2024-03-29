@@ -10,6 +10,10 @@ class MeshSampler:
             if not os.path.exists(self.mesh_path):
                 raise FileNotFoundError(f"{self.mesh_path} not found!")
             self.mesh = trimesh.load_mesh(self.mesh_path)
+            
+            # filter scene or mesh
+            if isinstance(self.mesh, trimesh.Scene):
+                self.mesh = trimesh.util.concatenate([m for m in self.mesh.geometry.values()])
         except Exception as e:
             print(f"Error when initializing mesh sampler: {e}")
             

@@ -39,6 +39,10 @@ class SITA_VAE(nn.Module):
         self.shape_projection = nn.Parameter(torch.empty(self.shape_model.width, self.clip_model.projection_dim))
         nn.init.normal_(self.shape_projection, std=self.clip_model.projection_dim ** -0.5)
         
+    @property
+    def latent_shape(self):
+        return self.shape_model.latent_shape
+        
     def encode(self, surface: torch.FloatTensor, sample_posterior=True):
 
         pc = surface[..., 0:3]

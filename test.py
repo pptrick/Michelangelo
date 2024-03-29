@@ -16,10 +16,8 @@ def load_surface(pointcloud_path):
         surface = input_pc['points']
         normal = input_pc['normals']
     
-    rng = np.random.default_rng()
-    ind = rng.choice(surface.shape[0], 4096, replace=False)
-    surface = torch.FloatTensor(surface[ind])
-    normal = torch.FloatTensor(normal[ind])
+    surface = torch.FloatTensor(surface)
+    normal = torch.FloatTensor(normal)
     
     surface = torch.cat([surface, normal], dim=-1).unsqueeze(0).cuda()
     
@@ -37,9 +35,12 @@ def save_pcld(args, surface:torch.Tensor):
             f.write(f"v {points[i][0]} {points[i][1]} {points[i][2]} {normals[i][0]} {normals[i][1]} {normals[i][2]} \n")
 
 
-def reconstruction(args, model:SITA_VAE, bounds=(-1.25, -1.25, -1.25, 1.25, 1.25, 1.25), octree_depth=7, num_chunks=10000):
-
-    if str(args.pointcloud_path).endswith(".npz"):
+def reconstruction(args, model:SITA_VAE, bounds=(-1.0, -1.0, -1.0, 1.0, 1.0, 1.0), octree_depth=8, num_chunks=10000):
+    shape_zq = None
+    surface = None
+    if str(args.pointcloud_path).endswith("latent.npz"):
+        shape_zq = torch.FloatTensor(np.load(args.pointcloud_path)['latent']).cuda()
+    elif str(args.pointcloud_path).endswith(".npz"):
         surface = load_surface(args.pointcloud_path)
     else:
         mesh_sampler = MeshSampler(args.pointcloud_path)
@@ -47,7 +48,8 @@ def reconstruction(args, model:SITA_VAE, bounds=(-1.25, -1.25, -1.25, 1.25, 1.25
         surface = torch.FloatTensor(surface).unsqueeze(0).cuda()
         
     # encoding
-    shape_zq = model.encode(surface=surface, sample_posterior=True)
+    if shape_zq is None:
+        shape_zq = model.encode(surface=surface, sample_posterior=True)
     # decoding
     latents = model.decode(shape_zq)
     
@@ -64,7 +66,8 @@ def reconstruction(args, model:SITA_VAE, bounds=(-1.25, -1.25, -1.25, 1.25, 1.25
     os.makedirs(args.output_dir, exist_ok=True)
     recon_mesh.export(os.path.join(args.output_dir, 'reconstruction.obj'))   
     
-    save_pcld(args, surface) 
+    if surface is not None:
+        save_pcld(args, surface)
     
     print(f'-----------------------------------------------------------------------------')
     print(f'>>> Finished and mesh saved in {os.path.join(args.output_dir, "reconstruction.obj")}')
