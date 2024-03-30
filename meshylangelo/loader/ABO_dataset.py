@@ -7,13 +7,17 @@ from torch.utils.data import Dataset
 import numpy as np
 from PIL import Image
 
+TEST_INDEX = 50
+
 class ABODataset(Dataset):
     def __init__(
         self,
-        data_root
+        data_root,
+        mode="train"
     ):
         super().__init__()
         self.data_root = data_root
+        self.mode = mode
         entries = [os.path.join(data_root, f) for f in sorted(os.listdir(data_root))]
         # filter
         self.entries = []
@@ -33,7 +37,10 @@ class ABODataset(Dataset):
         # load image
         with open(os.path.join(entry, "transforms.json"), 'r') as fp:
             frames = json.load(fp=fp)["frames"]
-        frame = random.choice(frames)
+        if self.mode == "train":
+            frame = random.choice(frames)
+        else:
+            frame = frames[TEST_INDEX]
         image_path = os.path.join(entry, frame['file_path'])
         image = Image.open(image_path)
         background_color = np.random.uniform(low=0.0, high=255.0, size=3).astype(np.uint8) # give random background color
@@ -54,8 +61,15 @@ class ABODataset(Dataset):
         
 if __name__ == "__main__":
     ds = ABODataset("/home/chuanyu/Desktop/ShapeInit/data")
-    print(len(ds))
-    for k in ds[0]:
-        print(k, ds[0][k].size())
+    # print(len(ds))
+    # for k in ds[0]:
+    #     print(k, ds[0][k].size())
+    std_array = []
+    for i in range(len(ds)):
+        std_array.append(ds[i]["latents"].std().item())
+    
+    std_array = np.array(std_array)
+    print(std_array.mean(), std_array.min(), std_array.max(), std_array.std()) 
+    
 
         

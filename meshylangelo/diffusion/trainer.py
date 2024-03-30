@@ -108,7 +108,7 @@ class Trainer:
         )
         
         # TODO: lr scheduler
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.6)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.8)
         
     def compute_loss(self, model_outputs, split):
         """
@@ -175,7 +175,7 @@ class Trainer:
         noise_pred = self.denoiser(noisy_z, timesteps, conditions)
         
         diffusion_outputs = {
-            "x_0": noisy_z,
+            "x_0": latents,
             "noise": noise,
             "pred": noise_pred
         }
@@ -259,6 +259,7 @@ class Trainer:
             for sample, t in sample_loop:
                 latents = sample
             # TODO： write decode, without z scale factor
+            # print(latents.size(), latents.mean(), latents.std(), latents.min(), latents.max())
             decode_out = self.first_stage_model.decode(latents)
             mesh_out = self.first_stage_model.latent2mesh(
                 decode_out,
