@@ -7,7 +7,7 @@ from typing import List, Tuple, Dict, Optional, Union
 
 from transformers import CLIPModel
 
-from meshylangelo.vae.shape_module import AlignedShapeLatentPerceiver
+from meshylangelo.vae.shape_module import AlignedShapeLatentPerceiver, ShapeAsLatentPerceiver
 from meshylangelo.vae.utils import Latent2MeshOutput, extract_geometry
 
 class SITA_VAE(nn.Module):
@@ -34,6 +34,23 @@ class SITA_VAE(nn.Module):
             qkv_bias=False,
             use_checkpoint=True
         )
+        
+        # self.shape_model: ShapeAsLatentPerceiver = ShapeAsLatentPerceiver(
+        #     device=None, dtype=None,
+        #     num_latents=257,
+        #     embed_dim=64,
+        #     point_feats=3,
+        #     num_freqs=8,
+        #     include_pi=False,
+        #     heads=12,
+        #     width=768,
+        #     num_encoder_layers=8,
+        #     num_decoder_layers=16,
+        #     use_ln_post=True,
+        #     init_scale=0.25,
+        #     qkv_bias=False,
+        #     use_checkpoint=True
+        # )
         
         # shape projection and init
         self.shape_projection = nn.Parameter(torch.empty(self.shape_model.width, self.clip_model.projection_dim))

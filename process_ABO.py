@@ -34,8 +34,11 @@ def process(src_dir, tar_dir, vae_model):
         surface = sampler.sample(n_points=10000)
         surface = torch.FloatTensor(surface).unsqueeze(0).cuda()
         
-        shape_zq = model.encode(surface=surface, sample_posterior=True) # [1, 256, 64]
-        np.savez_compressed(os.path.join(out_dir, "latent.npz"), latent=shape_zq.cpu().numpy())
+        # shape_zq = model.encode(surface=surface, sample_posterior=True) # [1, 256, 64]
+        pc = surface[..., 0:3]
+        feats = surface[..., 3:6]
+        latents, _, _ = model.shape_model.encode(pc, feats) # SITA VAE with ShapeAsLatentPerceiver
+        np.savez_compressed(os.path.join(out_dir, "latent.npz"), latent=latents.cpu().numpy())
         
     
 if __name__ == "__main__":

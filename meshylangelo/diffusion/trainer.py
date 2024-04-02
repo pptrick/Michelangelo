@@ -145,7 +145,7 @@ class Trainer:
 
         return total_loss, loss_dict
     
-    def run_step(self, batch:dict):
+    def run_step(self, batch:dict, uncond_ratio=0.1):
         if "latents" in batch:
             # TODO: should we add z_scale_factor?
             latents = batch["latents"]
@@ -154,6 +154,8 @@ class Trainer:
             raise NotImplementedError(f"Data type in batch ({[k for k in batch]}) not yet supported.")
         
         conditions = self.condition_encoder(batch["images"])
+        uncond_index = (torch.rand(len(conditions)) < uncond_ratio)
+        conditions[uncond_index] = 0.0 # zdro uncond
         
         # sample noise: [batch_size, n_token, latent_dim]
         noise = torch.randn_like(latents)
@@ -182,10 +184,10 @@ class Trainer:
         
         return diffusion_outputs
     
-    def train_step(self, batch: Dict[str, Union[torch.FloatTensor, List[str]]]):
+    def train_step(self, batch: Dict[str, Union[torch.FloatTensor, List[str]]], uncond_ratio:float=0.1):
         
         self.denoiser.train()
-        diffusion_outputs = self.run_step(batch)
+        diffusion_outputs = self.run_step(batch, uncond_ratio)
         loss, loss_dict = self.compute_loss(diffusion_outputs, "train")
         
         for item in loss_dict:
@@ -199,7 +201,11 @@ class Trainer:
         
         self.scheduler.step()
         
-    def train(self, dataloader):
+    def train(
+        self, 
+        dataloader,
+        uncond_ratio=0.1,
+    ):
         # initialize training save dir
         self.train_outdir = Path(self.outdir) / "training"
         self.checkpoint_dir = self.train_outdir / "checkpoints"
@@ -215,7 +221,7 @@ class Trainer:
             self.epoch = epoch
             self.pbar = tqdm(dataloader, desc=f"training epoch {self.epoch}:")
             for batch in self.pbar:
-                self.train_step(batch=batch)
+                self.train_step(batch=batch, uncond_ratio=uncond_ratio)
                 self.global_iters += 1
             
             # save checkpoints
@@ -258,8 +264,18 @@ class Trainer:
             )
             for sample, t in sample_loop:
                 latents = sample
+                
             # TODO： write decode, without z scale factor
-            # print(latents.size(), latents.mean(), latents.std(), latents.min(), latents.max())
+            
+            # [DEBUG] information about latent
+            print("===========Latent Information (Sampling)===========")
+            print(f"size: {latents.size()}")
+            print(f"mean: {latents.mean().item()}")
+            print(f"std: {latents.std().item()}")
+            print(f"min: {latents.min().item()}")
+            print(f"max: {latents.max().item()}")
+            print("===================================================")
+            
             decode_out = self.first_stage_model.decode(latents)
             mesh_out = self.first_stage_model.latent2mesh(
                 decode_out,

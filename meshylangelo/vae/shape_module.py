@@ -52,7 +52,7 @@ class CrossAttentionEncoder(nn.Module):
         self.use_checkpoint = use_checkpoint
         self.num_latents = num_latents
 
-        self.query = nn.Parameter(torch.randn((num_latents, width), device=device, dtype=dtype) * 0.02)
+        self.query = nn.Parameter(torch.randn((num_latents, width), device=device, dtype=dtype) * 0.02) # learnable query tokens
 
         self.fourier_embedder = fourier_embedder
         self.input_proj = nn.Linear(self.fourier_embedder.out_dim + point_feats, width, device=device, dtype=dtype)
@@ -194,7 +194,7 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
         super().__init__()
 
         self.use_checkpoint = use_checkpoint
-
+        self.width = width
         self.num_latents = num_latents
         self.fourier_embedder = FourierEmbedder(num_freqs=num_freqs, include_pi=include_pi)
 
@@ -269,7 +269,7 @@ class ShapeAsLatentPerceiver(ShapeAsLatentModule):
             posterior (DiagonalGaussianDistribution or None):
         """
 
-        latents, center_pos = self.encoder(pc, feats)
+        latents, center_pos = self.encoder(pc, feats) # Es, point cloud
 
         posterior = None
         if self.embed_dim > 0:
@@ -358,8 +358,6 @@ class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
             use_checkpoint=use_checkpoint
         )
 
-        self.width = width
-
     def encode(self,
                pc: torch.FloatTensor,
                feats: Optional[torch.FloatTensor] = None,
@@ -386,7 +384,7 @@ class AlignedShapeLatentPerceiver(ShapeAsLatentPerceiver):
                        pc: torch.FloatTensor,
                        feats: Optional[torch.FloatTensor] = None):
 
-        x, _ = self.encoder(pc, feats)
+        x, _ = self.encoder(pc, feats) # Es, point cloud
 
         shape_embed = x[:, 0]
         latents = x[:, 1:]
