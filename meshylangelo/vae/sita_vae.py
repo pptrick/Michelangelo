@@ -35,23 +35,6 @@ class SITA_VAE(nn.Module):
             use_checkpoint=True
         )
         
-        # self.shape_model: ShapeAsLatentPerceiver = ShapeAsLatentPerceiver(
-        #     device=None, dtype=None,
-        #     num_latents=257,
-        #     embed_dim=64,
-        #     point_feats=3,
-        #     num_freqs=8,
-        #     include_pi=False,
-        #     heads=12,
-        #     width=768,
-        #     num_encoder_layers=8,
-        #     num_decoder_layers=16,
-        #     use_ln_post=True,
-        #     init_scale=0.25,
-        #     qkv_bias=False,
-        #     use_checkpoint=True
-        # )
-        
         # shape projection and init
         self.shape_projection = nn.Parameter(torch.empty(self.shape_model.width, self.clip_model.projection_dim))
         nn.init.normal_(self.shape_projection, std=self.clip_model.projection_dim ** -0.5)

@@ -14,7 +14,7 @@ from diffusers.schedulers import (
 )
 
 from meshylangelo.vae.sita_vae import SITA_VAE
-from meshylangelo.diffusion.denoiser import AttnUnetDenoiser
+from meshylangelo.diffusion.denoiser import AttnUnetDenoiser, DiTDenoiser
 from meshylangelo.modules.condition_encoders import FrozenCLIPImageGridEmbedder
 
 
@@ -155,7 +155,7 @@ class Trainer:
         
         conditions = self.condition_encoder(batch["images"])
         uncond_index = (torch.rand(len(conditions)) < uncond_ratio)
-        conditions[uncond_index] = 0.0 # zdro uncond
+        conditions[uncond_index] = 0.0 # zero uncond
         
         # sample noise: [batch_size, n_token, latent_dim]
         noise = torch.randn_like(latents)
@@ -179,7 +179,8 @@ class Trainer:
         diffusion_outputs = {
             "x_0": latents,
             "noise": noise,
-            "pred": noise_pred
+            "pred": noise_pred,
+            "t": timesteps
         }
         
         return diffusion_outputs

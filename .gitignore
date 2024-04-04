@@ -162,4 +162,4 @@ cython_debug/
 checkpoints/
 output/
 example_data/
-exp/
+exp*/

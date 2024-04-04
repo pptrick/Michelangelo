@@ -7,8 +7,6 @@ from torchvision import transforms
 from transformers import CLIPModel, CLIPTokenizer
 from collections import OrderedDict
 
-from michelangelo.data.transforms import RandomResize
-
 
 class AbstractEncoder(nn.Module):
     embedding_dim: int
