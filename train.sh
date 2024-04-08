@@ -1,0 +1,1 @@
+accelerate launch train.py --task training --denoiser_ckpt ./exp_ABO_cond/training/checkpoints/latest_denoiser.ckpt --outdir exp_ABO_cond --data_name ABO --data_root /mnt/storage/ABO-nerf --n_epoch 2000 --batch_size 4

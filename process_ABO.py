@@ -1,4 +1,5 @@
 import os
+import argparse
 import tqdm
 
 import torch
@@ -31,24 +32,30 @@ def process(src_dir, tar_dir, vae_model):
         os.makedirs(out_dir, exist_ok=True)
         
         sampler = MeshSampler(mesh_path=loader[i])
-        surface = sampler.sample(n_points=10000)
+        surface = sampler.sample(n_points=10000, normalize=1)
         surface = torch.FloatTensor(surface).unsqueeze(0).cuda()
         
-        # shape_zq = model.encode(surface=surface, sample_posterior=True) # [1, 256, 64]
-        pc = surface[..., 0:3]
-        feats = surface[..., 3:6]
-        latents, _, _ = model.shape_model.encode(pc, feats) # SITA VAE with ShapeAsLatentPerceiver
-        np.savez_compressed(os.path.join(out_dir, "latent.npz"), latent=latents.cpu().numpy())
-        
+        shape_zq = model.encode(surface=surface, sample_posterior=True) # [1, 256, 64]
+        np.savez_compressed(os.path.join(out_dir, "latent.npz"), latent=shape_zq.cpu().numpy())
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(prog="generate VAE latent for ABO dataset")
+    parser.add_argument('--vae_ckpt', type=str, default="./meshylangelo/vae/checkpoints/shapevae-256.ckpt", help='path to VAE checkpoint')
+    parser.add_argument('--src', type=str, default="/mnt/storage/ABO", help='directory of original ABO dataset')
+    parser.add_argument('--tar', type=str, default="/mnt/storage/ABO-nerf", help='directory of target processed ABO dataset')
+    return parser.parse_args()
     
 if __name__ == "__main__":
     from meshylangelo.vae.sita_vae import SITA_VAE
+    args = parse_args()
+    
     model = SITA_VAE()
-    model.load_state_dict(torch.load("./meshylangelo/vae/checkpoints/shapevae-256.ckpt", map_location="cpu"), strict=False)
+    model.load_state_dict(torch.load(args.vae_ckpt, map_location="cpu"), strict=False)
     model = model.cuda().eval()
     
     process(
-        src_dir="/home/chuanyu/Desktop/Dataset/ABO",
-        tar_dir="/home/chuanyu/Desktop/ShapeInit/data",
+        src_dir=args.src,
+        tar_dir=args.tar,
         vae_model=model
     )

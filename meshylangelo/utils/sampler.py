@@ -17,9 +17,15 @@ class MeshSampler:
         except Exception as e:
             print(f"Error when initializing mesh sampler: {e}")
             
-    def sample(self, n_points=4096, save_path=None):
+    def sample(self, n_points=4096, save_path=None, normalize=None):
         if self.mesh is not None:
             points, face_indices = trimesh.sample.sample_surface_even(self.mesh, n_points)
+            if normalize is not None:
+                span_min = np.min(points, axis=0)
+                span_max = np.max(points, axis=0)
+                center = (span_min + span_max) / 2.0
+                span = np.max((span_max - span_min) / 2.0)
+                points = (points - center) / span
             normals = self.mesh.face_normals[face_indices]
             if save_path is not None and isinstance(save_path, str):
                 save_path = save_path if save_path.endswith(".npz") else save_path + ".npz" 

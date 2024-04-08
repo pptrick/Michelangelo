@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from typing import List, Tuple, Dict, Optional, Union
@@ -17,26 +18,11 @@ from meshylangelo.vae.sita_vae import SITA_VAE
 from meshylangelo.diffusion.denoiser import AttnUnetDenoiser, DiTDenoiser
 from meshylangelo.modules.condition_encoders import FrozenCLIPImageGridEmbedder
 
+from accelerate import Accelerator
 
-class Trainer:
-    def __init__(
-        self,
-        outdir = "exp",
-        device = "cuda",
-        denoiser_ckpt_path = None,
-        vae_ckpt_path = "./meshylangelo/vae/checkpoints/shapevae-256.ckpt",
-        lr:float=1e-4,
-        n_epoch:int=100):
-        
-        self.outdir = outdir
-        print(f"[INFO] initializing trainer, saving results to {self.outdir}...")
-        os.makedirs(self.outdir, exist_ok=True)
-        
-        self.device = device
-        self.lr = lr # TODO: set a proper learning rate
-        self.n_epoch = n_epoch
-        
-        # TODO: currently hard coding, maybe consider change to DiT?
+class DiffusionModel(nn.Module):
+    def __init__(self):
+        super().__init__()
         self.denoiser = AttnUnetDenoiser(
             device=None, dtype=None,
             input_channels=64,
@@ -51,32 +37,81 @@ class Trainer:
             use_checkpoint=True
         )
         
-        if denoiser_ckpt_path is not None:
-            print(f"[INFO] denoiser using pretrained checkpoint: {denoiser_ckpt_path}")
-            self.denoiser.load_state_dict(
-                torch.load(denoiser_ckpt_path, map_location="cpu")
-            )
-        
-        self.denoiser = self.denoiser.to(device=device)
-        
         self.condition_encoder = FrozenCLIPImageGridEmbedder(
             version="openai/clip-vit-large-patch14",
-            device=device,
             zero_embedding_radio=0.1
         )
         
-        self.condition_encoder = self.condition_encoder.to(device=device)
+    def forward(self, noisy_z, timesteps, images, uncond_ratio=0.1):
+        conditions = self.condition_encoder(images)
+        uncond_index = (torch.rand(len(conditions)) < uncond_ratio)
+        conditions[uncond_index] = 0.0 # zero uncond
         
-        self.first_stage_model = SITA_VAE(
-            clip_model_version="openai/clip-vit-large-patch14",
-        )
+        noise_pred = self.denoiser(noisy_z, timesteps, conditions)
         
-        print(f"[INFO] vae using pretrained checkpoint: {vae_ckpt_path}")
-        self.first_stage_model.load_state_dict(
-            torch.load(vae_ckpt_path, map_location="cpu"), strict=False
-        )
+        return noise_pred
+    
+    def load_ckpt(self, ckpt_path=None):
+        if ckpt_path is not None:
+            print(f"[INFO] denoiser using pretrained checkpoint: {ckpt_path}")
+            self.denoiser.load_state_dict(
+                torch.load(ckpt_path, map_location="cpu")
+            )
+            
+    def save_ckpt(self, ckpt_path):
+        torch.save(self.denoiser.state_dict(), ckpt_path)
+
+
+class Trainer:
+    def __init__(
+        self,
+        outdir = "exp",
+        device = "cuda",
+        mode = "train",
+        denoiser_ckpt_path = None,
+        vae_ckpt_path = "./meshylangelo/vae/checkpoints/shapevae-256.ckpt",
+        lr:float=1e-4,
+        n_epoch:int=100):
         
-        self.first_stage_model = self.first_stage_model.to(device=device)
+        self.outdir = outdir
+        os.makedirs(self.outdir, exist_ok=True)
+        
+        self.device = device
+        self.mode = mode
+        
+        self.model = DiffusionModel()
+        self.model.load_ckpt(denoiser_ckpt_path)
+        
+        if mode == "train":
+            self.lr = lr # TODO: set a proper learning rate
+            self.n_epoch = n_epoch
+            
+            self.accelerator = Accelerator()
+            self.accelerator.print(f"[INFO] initializing trainer, saving results to {self.outdir}...")
+            
+            self.optimizer = torch.optim.AdamW(
+                params=list(self.model.denoiser.parameters()),
+                lr=lr,
+                betas=[0.9, 0.99],
+                eps=1.e-6,
+                weight_decay=1.e-2
+            )
+            
+            self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=2000, gamma=0.9)
+            
+        elif mode == "test":
+            self.first_stage_model = SITA_VAE(
+                clip_model_version="openai/clip-vit-large-patch14",
+            )
+            
+            print(f"[INFO] vae using pretrained checkpoint: {vae_ckpt_path}")
+            self.first_stage_model.load_state_dict(
+                torch.load(vae_ckpt_path, map_location="cpu"), strict=False
+            )
+            
+            self.first_stage_model = self.first_stage_model.to(device=device)
+            
+            self.model = self.model.to(device=device)
         
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
@@ -98,17 +133,6 @@ class Trainer:
             steps_offset=1,
             # prediction_type="epsilon"
         )
-        
-        self.optimizer = torch.optim.AdamW(
-            params=list(self.denoiser.parameters()),
-            lr=lr,
-            betas=[0.9, 0.99],
-            eps=1.e-6,
-            weight_decay=1.e-2
-        )
-        
-        # TODO: lr scheduler
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.8)
         
     def compute_loss(self, model_outputs, split):
         """
@@ -149,13 +173,9 @@ class Trainer:
         if "latents" in batch:
             # TODO: should we add z_scale_factor?
             latents = batch["latents"]
-            latents = latents.to(self.device)
+            latents = latents
         else:
             raise NotImplementedError(f"Data type in batch ({[k for k in batch]}) not yet supported.")
-        
-        conditions = self.condition_encoder(batch["images"])
-        uncond_index = (torch.rand(len(conditions)) < uncond_ratio)
-        conditions[uncond_index] = 0.0 # zero uncond
         
         # sample noise: [batch_size, n_token, latent_dim]
         noise = torch.randn_like(latents)
@@ -174,7 +194,7 @@ class Trainer:
         noisy_z = self.noise_scheduler.add_noise(latents, noise, timesteps)
         
         # diffusion model forward
-        noise_pred = self.denoiser(noisy_z, timesteps, conditions)
+        noise_pred = self.model(noisy_z, timesteps, batch["images"], uncond_ratio)
         
         diffusion_outputs = {
             "x_0": latents,
@@ -187,17 +207,18 @@ class Trainer:
     
     def train_step(self, batch: Dict[str, Union[torch.FloatTensor, List[str]]], uncond_ratio:float=0.1):
         
-        self.denoiser.train()
         diffusion_outputs = self.run_step(batch, uncond_ratio)
         loss, loss_dict = self.compute_loss(diffusion_outputs, "train")
         
-        for item in loss_dict:
-            self.writer.add_scalar(item, loss_dict[item], self.global_iters)
-            
-        self.pbar.set_postfix({'loss': loss_dict["train/total_loss"]})
+        # log output
+        if self.accelerator.is_main_process:
+            for item in loss_dict:
+                self.writer.add_scalar(item, loss_dict[item], self.global_iters)
+        
+            self.pbar.set_postfix({'loss': loss_dict["train/total_loss"]}, refresh=False)
         
         self.optimizer.zero_grad()
-        loss.backward()
+        self.accelerator.backward(loss)
         self.optimizer.step()
         
         self.scheduler.step()
@@ -218,6 +239,9 @@ class Trainer:
         self.epoch = 0
         self.global_iters = 0
         
+        # initialize accelerator
+        self.model, self.optimizer, dataloader = self.accelerator.prepare(self.model, self.optimizer, dataloader)
+        
         for epoch in range(self.n_epoch):
             self.epoch = epoch
             self.pbar = tqdm(dataloader, desc=f"training epoch {self.epoch}:")
@@ -226,7 +250,7 @@ class Trainer:
                 self.global_iters += 1
             
             # save checkpoints
-            torch.save(self.denoiser.state_dict(), self.checkpoint_dir / "latest_denoiser.ckpt")
+            self.accelerator.save(self.model.module.denoiser.state_dict(), self.checkpoint_dir / "latest_denoiser.ckpt")
             
     def sample(
         self,
@@ -241,10 +265,10 @@ class Trainer:
             
         do_classifier_free_guidance = guidance_scale > 0
         
-        cond = self.condition_encoder(input["images"])
+        cond = self.model.condition_encoder(input["images"].to(self.device))
         
         if do_classifier_free_guidance:
-            un_cond = self.condition_encoder.unconditional_embedding(batch_size=len(cond))
+            un_cond = self.model.condition_encoder.unconditional_embedding(batch_size=len(cond)).to(cond.device)
             cond = torch.cat([un_cond, cond], dim=0)
             
         outputs = []
@@ -253,7 +277,7 @@ class Trainer:
         for _ in range(sample_times):
             sample_loop = ddim_sample(
                 self.denoise_scheduler,
-                self.denoiser,
+                self.model.denoiser,
                 shape=self.first_stage_model.latent_shape,
                 cond=cond,
                 steps=steps,

@@ -18,14 +18,27 @@ class ABODataset(Dataset):
         super().__init__()
         self.data_root = data_root
         self.mode = mode
-        entries = [os.path.join(data_root, f) for f in sorted(os.listdir(data_root))]
         # filter
+        self.load_entries(data_root, mode)
+    
+    def load_entries(self, data_root, mode="train"):
+        if mode == "train":
+            entry_list_file = os.path.join(data_root, "train_set.txt")
+        elif mode == "test":
+            entry_list_file = os.path.join(data_root, "test_set.txt")
+        else:
+            raise NotImplementedError(f"[Error] unrecognized mode: {mode}")
+        
         self.entries = []
-        for entry in entries:
-            if os.path.isdir(entry) and os.path.isfile(os.path.join(entry, "mesh", "latent.npz")):
-                if os.path.isdir(os.path.join(entry, "images")):
-                    self.entries.append(entry)
-                    
+        with open(entry_list_file, "r") as f:
+            name = f.readline().strip()
+            while name:
+                entry = os.path.join(data_root, name)
+                if os.path.isdir(entry) and os.path.isfile(os.path.join(entry, "mesh", "latent.npz")):
+                    if os.path.isdir(os.path.join(entry, "images")):
+                        self.entries.append(entry)
+                name = f.readline().strip()
+    
     def __len__(self):
         return len(self.entries)
     

@@ -299,23 +299,19 @@ class FrozenCLIPImageGridEmbedder(AbstractEncoder):
     def __init__(
             self,
             version="openai/clip-vit-large-patch14",
-            device="cuda",
             zero_embedding_radio=0.1,
     ):
         super().__init__()
 
-        self.device = device
-
         self.clip_dict = OrderedDict()
         self.clip_name = os.path.split(version)[-1]
 
-        clip_model: CLIPModel = CLIPModel.from_pretrained(version)
-        clip_model.text_model = None
-        clip_model.text_projection = None
-        clip_model = clip_model.eval()
+        self.clip_model: CLIPModel = CLIPModel.from_pretrained(version)
+        self.clip_model.text_model = None
+        self.clip_model.text_projection = None
+        self.clip_model = self.clip_model.eval()
         for param in self.parameters():
             param.requires_grad = False
-        self.clip_dict[self.clip_name] = clip_model
 
         self.transform = transforms.Compose(
             [
@@ -328,41 +324,25 @@ class FrozenCLIPImageGridEmbedder(AbstractEncoder):
             ]
         )
         self.zero_embedding_radio = zero_embedding_radio
-        self.embedding_dim = clip_model.vision_embed_dim
-
-        self._move_flag = False
-
-    @property
-    def clip(self):
-        return self.clip_dict[self.clip_name]
-
-    def move(self):
-        if self._move_flag:
-            return
-
-        self.clip_dict[self.clip_name] = self.clip_dict[self.clip_name].to(self.device)
-        self._move_flag = True
+        self.embedding_dim = self.clip_model.vision_embed_dim
 
     def unconditional_embedding(self, batch_size):
         zero = torch.zeros(
             batch_size,
-            self.clip.vision_model.embeddings.num_positions,
+            self.clip_model.vision_model.embeddings.num_positions,
             self.embedding_dim,
-            device=self.device,
-            dtype=self.clip.visual_projection.weight.dtype,
+            dtype=self.clip_model.visual_projection.weight.dtype,
         )
         return zero
 
     def forward(self, image, value_range=(-1, 1), zero_embedding_radio=0):
-        self.move()
-
         if value_range is not None:
             low, high = value_range
             image = (image - low) / (high - low)
 
-        image = image.to(self.device, dtype=self.clip.visual_projection.weight.dtype)
+        image = image.to(dtype=self.clip_model.visual_projection.weight.dtype)
 
-        z = self.clip.vision_model(self.transform(image)).last_hidden_state
+        z = self.clip_model.vision_model(self.transform(image)).last_hidden_state
 
         if zero_embedding_radio > 0:
             mask = torch.rand((len(image), 1, 1), device=z.device, dtype=z.dtype) >= zero_embedding_radio

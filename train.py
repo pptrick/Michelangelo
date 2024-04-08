@@ -1,12 +1,15 @@
 import os
 import shutil
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
 import cv2
+from PIL import Image
 import trimesh
 from einops import repeat, rearrange
+import numpy as np
 
 import torch
 from torch.utils.data import DataLoader
@@ -33,6 +36,7 @@ class TrainingManager:
         self,
         out_dir:str|Path = "exp",
         device:str|torch.device = "cuda",
+        mode:str="train",
         denoiser_ckpt_path:Optional[str] = None,
         vae_ckpt_path:Optional[str] = "./meshylangelo/vae/checkpoints/shapevae-256.ckpt",
         lr:float=1e-4,
@@ -40,9 +44,11 @@ class TrainingManager:
     ):
         self.n_epoch = n_epoch
         self.out_dir = out_dir
+        self.mode = mode
         self.trainer = Trainer(
             outdir=out_dir,
             device=device,
+            mode=mode,
             denoiser_ckpt_path=denoiser_ckpt_path,
             vae_ckpt_path=vae_ckpt_path,
             lr=lr,
@@ -52,20 +58,20 @@ class TrainingManager:
         self.dataset = None
         self.data_mode = "train"
         
-    def load_dataset(self, data_root, name="ABO", mode="train", batch_size=4):
+    def load_dataset(self, data_root, name="ABO", batch_size=4):
         if name == "ABO":
-            self.dataset = ABODataset(data_root=data_root, mode=mode)
+            self.dataset = ABODataset(data_root=data_root, mode=self.mode)
         else:
             raise NotImplementedError(f"[Error] dataset class {name} is not implemented!")
         
-        if mode == "train":
+        if self.mode == "train":
             self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True, num_workers=os.cpu_count())
             self.data_mode = "train"
-        elif mode == "test":
+        elif self.mode == "test":
             self.dataloader = DataLoader(self.dataset, batch_size=1, shuffle=False, num_workers=os.cpu_count())
             self.data_mode = "test"
         else:
-            raise NotImplementedError(f"[Error] unrecognized dataset mode: {mode}")
+            raise NotImplementedError(f"[Error] unrecognized dataset mode: {self.mode}")
         
     def train(self):
         if self.dataset is None:
@@ -142,39 +148,79 @@ class TrainingManager:
                         os.remove(os.path.join(outdir, f))
                 shutil.rmtree(os.path.join(outdir, "assimp_gltf_out"))
                 os.rename(os.path.join(outdir, "output.mp4"), os.path.join(outdir, str(i) + "_render.mp4"))
+        
+        # save image
+        image = data["images"][0].cpu()
+        image = rearrange(image, "c h w -> h w c")
+        image = ((image + 1) * 255.0 / 2.0).numpy().astype(np.uint8)
+        Image.fromarray(image).save(os.path.join(outdir, "input.png"))
+        
                 
-            
+def parse_args():
+    parser = argparse.ArgumentParser(prog="train/test meshylangelo diffusion model")
+    parser.add_argument('--task', type=str, default="training", choices=["training", "testing"], help='type of task')
+    
+    parser.add_argument('--outdir', type=str, default="exp", help='output directory')
+    parser.add_argument('--denoiser_ckpt', type=str, default=None, help='path to pretrained denoiser checkpoint')
+    parser.add_argument('--vae_ckpt', type=str, default="./meshylangelo/vae/checkpoints/shapevae-256.ckpt", help='path to vae checkpoint')
+    
+    # dataset
+    parser.add_argument('--data_root', type=str, default="/mnt/storage/ABO-nerf", help='path to data root directory')
+    parser.add_argument('--data_name', type=str, default="ABO", choices=["ABO"], help='name of the dataset')
+    
+    # training
+    parser.add_argument('--n_epoch', type=int, default=500, help='number of training epochs, only valid when training')
+    parser.add_argument('--batch_size', type=int, default=4, help='batch size, only valid when training')
+    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate, only valid when training')
+    
+    # testing
+    parser.add_argument('--test_data_index', type=int, default=1, help='testing index of dataset, only valid when testing')
+    parser.add_argument('--img_path', type=str, default=None, help='path to input image, only valid when testing')
+    parser.add_argument('--num_samples', type=int, default=2, help='number of testing samples output, only valid when testing')
+    parser.add_argument('--guidance_scale', type=float, default=7.5, help='guidance scale, only valid when testing')
+    parser.add_argument('--steps', type=int, default=50, help='sample steps, only valid when testing')
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    train_manager = TrainingManager(
-        out_dir="exp_ABO",
-        # denoiser_ckpt_path= "./meshylangelo/diffusion/checkpoints/denoiser-ASLDM-256.ckpt",
-        denoiser_ckpt_path= "./exp_ABO/training/checkpoints/latest_denoiser.ckpt",
-        lr=1e-4,
-        n_epoch=500
-    )
+    args = parse_args()
+    task = args.task
     
-    DATA_ROOT = "/home/chuanyu/Desktop/ShapeInit/data"
+    if task == "training":
+        train_manager = TrainingManager(
+            out_dir=args.outdir,
+            mode="train",
+            vae_ckpt_path=args.vae_ckpt,
+            denoiser_ckpt_path=args.denoiser_ckpt,
+            lr=args.lr,
+            n_epoch=args.n_epoch
+        )
+        train_manager.load_dataset(
+            data_root=args.data_root,
+            name=args.data_name,
+            batch_size=args.batch_size
+        )
+        train_manager.train()
     
-    train_manager.load_dataset(
-        data_root=DATA_ROOT,
-        name="ABO",
-        mode="train",
-        batch_size=4
-    )
-    train_manager.train()
-    
-    train_manager.load_dataset(
-        data_root=DATA_ROOT,
-        name="ABO",
-        mode="test"
-    )
-    train_manager.test(
-        img_path=None,
-        data_index=1,
-        num_samples=2,
-        guidance_scale=7.5,
-        steps=50
-    )
+    elif task == "testing":
+        train_manager = TrainingManager(
+            out_dir=args.outdir,
+            mode="test",
+            vae_ckpt_path=args.vae_ckpt,
+            denoiser_ckpt_path=args.denoiser_ckpt,
+            lr=args.lr,
+            n_epoch=args.n_epoch
+        )
+        train_manager.load_dataset(
+            data_root=args.data_root,
+            name=args.data_name,
+        )
+        train_manager.test(
+            img_path=args.img_path,
+            data_index=args.test_data_index,
+            num_samples=args.num_samples,
+            guidance_scale=args.guidance_scale,
+            steps=args.steps
+        )
 
 
 
